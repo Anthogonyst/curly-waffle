@@ -1,0 +1,13 @@
+Content and Acknowledgements
+
+Primary dataset is the NYC Housing Sales Data Found in this Link:
+http://www1.nyc.gov/site/finance/taxes/property-rolling-sales-data.page
+
+The data in all the separate excel spreadsheets for 2003-2017 was merged via VBA scripting in Excel and further cleaned & de-duped in R
+
+Additionally, in my hunt for shapefiles I discovered these wonderful shapefiles from NYCPluto:
+https://www1.nyc.gov/site/planning/data-maps/open-data/dwn-pluto-mappluto.page
+
+I left joined it by "Block" & "Lot" onto the primary data frame, but 25% of the block/lot combo's ended up not having a corresponding entry in the Pluto shapefile and are NAs.
+
+Note that as in other uploaded datasets of NYC housing on Kaggle, many of these transactions have a sale_price of $0 or only a nominal amount far less than market value. These are likely property transfers to relatives and should be excluded from any analysis of market prices.
