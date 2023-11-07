@@ -17,8 +17,8 @@ library(here)
 }
 
 LoadBrooklynSalesMap <- function() {
-  files = list.files(here::here("data"), "brooklyn_sales_map.*Part\\d\\.csv", full.names = T) %>%
-    c(., list.files(here::here("data"), "brooklyn_sales_map.*Part\\d\\d\\.csv", full.names = T))
+  files = list.files(here::here("data/sales-map"), "brooklyn_sales_map.*Part\\d\\.csv", full.names = T) %>%
+    c(., list.files(here::here("data/sales-map"), "brooklyn_sales_map.*Part\\d\\d\\.csv", full.names = T))
   
   indexCol = "IndexColX"
   
@@ -48,3 +48,14 @@ LoadDoF <- function() {
     do.call(rbind, .)
 }
 
+PrepareBrooklyn <- function(df) {
+  df %>%
+    dplyr::mutate(
+      sale_price = as.numeric(sale_price),
+      sale_date = as.Date(sale_date, "%Y-%m-%d"),
+      APPDate = as.Date(APPDate, "%m/%d/%Y")
+    ) %>%
+      dplyr::mutate_at(., colnames(.)[sapply(., is.character)], as.factor) %>%
+        dplyr::rename(y = sale_price) %>%
+          dplyr::select(y, dplyr::everything())
+}
