@@ -68,7 +68,7 @@ head -n 1 "$filein" > "$filename"."$fileext".Header.tmp
 ### First N files
 for (( i=1; i<=${iter}; i++ ))
 do
-  let "n = ${nrow} * ${i} + 1"
+  n=$(( ${nrow} * ${i} + 1 ))
   head -n ${n} "$filein" | tail -n ${nrow} > "$filename".Part"$i"."$fileext".tmp
   cat "$filename"."$fileext".Header.tmp "$filename".Part"$i"."$fileext".tmp > "$filename".Part"$i"."$fileext"
   rm "$filename".Part"$i"."$fileext".tmp
