@@ -1,0 +1,159 @@
+---
+title: "Third Model Attempt"
+author: "Anthony Arroyo"
+date: "`r format(Sys.time(), '%m/%d/%Y')`"
+output: 
+  pdf_document:
+    pandoc_args: --listings
+    includes:
+      in_header: preamble.tex
+params:
+  sample_param:
+    value: 0
+---
+\newcommand{\br}{\hfill\break}
+\newcommand{\brsp}{\vspace{8pt}\hfill\break}
+```{r header, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(here)
+library(reshape2)
+library(parsnip)
+library(yardstick)
+library(caret)
+library(rpart.plot)
+
+invisible(lapply(list.files(here::here("R"), "\\.R$", full.names = TRUE), source))
+(function() { set.seed(8675309) })()
+```
+
+```{r private, include=FALSE}
+```
+
+```{r dataload, warning=FALSE}
+finance = LoadMarketData()
+brooklyn = PipelineBrooklyn()
+brook = brooklyn %>%
+  .SimplifyBuildingClass(.) %>%
+    CleanCols(.)
+```
+
+```{r}
+fixer = ExperimentOne(brook) %>%
+  RemoveInfluencers(., lm(y ~ ., .), 3) %>%
+    PreProcessExp2(.)
+tts = ExperimentOne(brook) %>%
+  PreProcessApply(., fixer) %>%
+    rsample::initial_split(.)
+crossValid = caret::trainControl(method = "cv", number = 5)
+```
+# Optimal Decision Tree Depth
+
+```{r}
+num = lapply(seq_len(30), DecisionTree, df = brook) %>%
+  lapply(., function(x) { x[[3]] }) %>%
+    do.call(rbind, .)
+
+ggplot2::ggplot(num) +
+ggplot2::aes(x = tree_depth, y = .estimate, colour = .metric) +
+ggplot2::geom_line(size = 0.5) +
+ggplot2::scale_color_hue(direction = 1) +
+ggplot2::theme_minimal() +
+ggplot2::ggtitle("Optimal tree depth for decision tree")
+```
+
+# Model 1: Depth Enforced Decision Tree
+
+```{r}
+treeOptimal = DecisionTree(rsample::training(tts), 6)
+treeOptimal[[1]]
+```
+
+```{r}
+results1 = treeOptimal[[3]]
+results1
+```
+
+
+# Model 2: Node Count Enforced Decision Tree
+
+```{r}
+treeUnbounded = train(y ~ ., method = "rpart", trControl = crossValid, tuneLength = 125, data = rsample::training(tts))
+rpart.plot(treeUnbounded$finalModel)
+```
+
+```{r}
+results2 = AnalyzeTree(treeUnbounded, rsample::testing(tts))[[3]]
+results2
+```
+
+# Model 3: Random Forest
+
+```{r}
+tictoc::tic()
+forestOne1 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 20, maxnodes = 40, data = rsample::training(tts))
+tictoc::toc()
+tictoc::tic()
+forestOne2 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 10, maxnodes = 80, data = rsample::training(tts))
+tictoc::toc()
+tictoc::tic()
+forestOne3 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 4, maxnodes = 200, data = rsample::training(tts))
+tictoc::toc()
+
+rbind(
+  AnalyzeTree(forestOne1, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestOne2, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestOne3, rsample::testing(tts))[[3]]
+)
+```
+
+
+# Model 3B: Random Forest
+
+```{r}
+trainHead = head(rsample::training(tts), 5000)
+
+tictoc::tic()
+forestTwo1 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 120, data = trainHead)
+tictoc::toc()
+tictoc::tic()
+forestTwo2 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 120, data = ExperimentTwo(trainHead))
+tictoc::toc()
+tictoc::tic()
+forestTwo3 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 120, data = ExperimentThree(trainHead))
+tictoc::toc()
+
+rbind(
+  AnalyzeTree(forestTwo1, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestTwo2, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestTwo3, rsample::testing(tts))[[3]]
+)
+
+```
+
+
+# Model 4: XGBoost Model
+
+```{r}
+xgModel = rsample::training(tts)[, sapply(rsample::training(tts), is.numeric)] %>%
+  head(., 5000) %>%
+    { as.matrix(.[, -1]) } %>%
+      xgboost::xgb.cv(data = ., label = head(rsample::training(tts)$y, nrow(.)),
+      objective = "reg:squarederror", nrounds = 10, nfold = 3, eta = 0.1, max_depth = 200)
+
+xgbData = rsample::training(tts)[, sapply(rsample::training(tts), is.numeric)] %>%
+  head(., 5000) %>%
+    { as.matrix(.[, -1]) } %>%
+      xgboost::xgb.DMatrix(., label = as.matrix(head(rsample::training(tts)$y, nrow(.))))
+
+# xgbData2 = rsample::training(tts)[, sapply(rsample::testing(tts), is.numeric)] %>%
+#   head(., 5000) %>%
+#     { as.matrix(.[, -1]) } %>%
+#       xgboost::xgb.DMatrix(., label = as.matrix(head(rsample::training(tts)$y, nrow(.))))
+
+# xgbModelReal = xgboost::xgb.train(data = xgbData, nrounds = 10, params = list(
+#   objective = "reg:squarederror", eta = 0.1, max_depth = 200
+# ))
+#       xgboost::xgb.train(data = ., label = as.matrix(head(rsample::training(tts)$y, nrow(.))),
+```
+
