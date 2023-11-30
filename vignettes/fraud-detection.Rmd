@@ -1,0 +1,97 @@
+---
+title: "Fraudelent Sales"
+author: "Anthony Arroyo"
+date: "`r format(Sys.time(), '%m/%d/%Y')`"
+output: 
+  pdf_document:
+    pandoc_args: --listings
+    includes:
+      in_header: preamble.tex
+params:
+  sample_param:
+    value: 0
+---
+\newcommand{\br}{\hfill\break}
+\newcommand{\brsp}{\vspace{8pt}\hfill\break}
+```{r header, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(here)
+library(reshape2)
+library(rvest)
+
+invisible(lapply(list.files(here::here("R"), "\\.R$", full.names = TRUE), source))
+(function() { set.seed(8675309) })()
+```
+
+```{r private, include=FALSE}
+```
+
+```{r dataload, warning=FALSE}
+brooklyn = PipelineBrooklyn()
+addr = which(colnames(brooklyn) %in% c("address", "ADDRESS"))
+brook = head(brooklyn, 5000)
+```
+
+```{r, include=FALSE}
+sussy = here::here("data", "suspicious-addresses.txt")
+if (file.exists(sussy)) {
+  sus = readLines(sussy)
+} else {
+  tictoc::tic("Begin the race!")
+  tictoc::tic("Unoptimized!")
+  fraudUnopt = Dictionary(brooklyn, "ADDRESS", "SALE PRICE", .BadHistory)
+  tictoc::toc()
+  tictoc::tic("Optimized!")
+  failed = DictionaryOptimized(brooklyn, "ADDRESS", "SALE PRICE", .BadHistory)
+  tictoc::toc()
+  tictoc::tic("More?!")
+  fraudMore = DictionaryOptimizedMore(brooklyn, "ADDRESS", "SALE PRICE", .BadHistory)
+  tictoc::toc()
+  tictoc::tic("More!!!")
+  fraudMoreee = DictionaryOptimizedMoreee(brooklyn, "ADDRESS", "SALE PRICE", .BadHistory)
+  tictoc::toc()
+  tictoc::tic("AAHHHH!!!")
+  fraudVec = DictionaryVec(brooklyn, "ADDRESS", "SALE PRICE", .BadHistoryBetter)
+  tictoc::toc()
+  tictoc::tic("RRRRRREEEEEEEEE!!!")
+  fraudVector = DictionaryVectorized(brooklyn, "ADDRESS", "SALE PRICE", .BadHistoryVectorized)
+  tictoc::toc()
+  tictoc::toc()
+  #recentFraud = Dictionary(brooklyn, "ADDRESS", "SALE PRICE", .Worsened)
+  
+# <!-- Unoptimized!: 515.72 sec elapsed -->
+# <!-- Optimized!: 534.79 sec elapsed -->
+# <!-- More?!: 409.78 sec elapsed -->
+# <!-- More!!!: 460.66 sec elapsed -->
+# <!-- AAHHHH!!!: 464.89 sec elapsed -->
+# <!-- Begin the race!: 2386.07 sec elapsed -->
+
+  sus = fraudMore %>%
+    { .$t[.$v] } %T>%
+      writeLines(., here::here("data", "suspicious-addresses.txt")) %>%
+        { . }
+}
+
+```
+
+```{r}
+brook = brooklyn %>%
+  .[.$ADDRESS %in% sus, ]
+
+za = dplyr::count(brooklyn, ADDRESS)
+zb = za[za$n > 1, ] %>%
+  .$ADDRESS %>%
+    { brooklyn[brooklyn$ADDRESS %in% ., ] }
+
+zb
+zb %>%
+  .[.$ADDRESS %in% sus, ]
+```
+
+```{r}
+hot = DictionaryVectorized(zb, "ADDRESS", "SALE PRICE", .VeryBadHistory)
+sussyBaka = hot %>%
+    { .$t[.$v] }
+```
+
