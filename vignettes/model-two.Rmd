@@ -1,0 +1,181 @@
+---
+title: "Second Model Attempt"
+author: "Anthony Arroyo"
+date: "`r format(Sys.time(), '%m/%d/%Y')`"
+output: 
+  pdf_document:
+    pandoc_args: --listings
+    includes:
+      in_header: preamble.tex
+params:
+  sample_param:
+    value: 0
+---
+\newcommand{\br}{\hfill\break}
+\newcommand{\brsp}{\vspace{8pt}\hfill\break}
+```{r header, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(here)
+library(reshape2)
+
+invisible(lapply(list.files(here::here("R"), "\\.R$", full.names = TRUE), source))
+(function() { set.seed(8675309) })()
+```
+
+```{r private, include=FALSE}
+```
+
+```{r dataload, warning=FALSE}
+finance = LoadMarketData()
+brooklyn = PipelineBrooklyn()
+brook = brooklyn %>%
+  .SimplifyBuildingClass(.) %>%
+    CleanCols(.)
+```
+
+```{r}
+PlotVarDistribution(brook)
+```
+
+```{r}
+brookNum = brook[, sapply(brook, is.numeric)]
+brookLm = lm(y ~ ., CleanColsAssessment(brook))
+summary(brookLm)
+```
+
+```{r}
+PlotCorrEllipse(cor(brookNum))
+heatmap(cor(brookNum))
+CorrelationFunnel(CleanColsAssessment(brookNum), "y", 4, showPlot = TRUE)
+```
+
+```{r}
+pca = prcomp(scale(brookNum))
+summary(pca)
+pca
+```
+
+```{r}
+trainData = rsample::initial_split(ExperimentOne(brook))
+modelOne = lm(y ~ ., rsample::training(trainData))
+
+summary.lm(modelOne)
+```
+
+```{r}
+.PlotFour(modelOne)
+```
+
+```{r}
+PlotLinearity(modelOne)
+PlotDistribution(modelOne)
+PlotQQuantile(modelOne)
+```
+
+## Model 2 - Full Model without Finance
+
+```{r}
+modelTwo = lm(y ~ ., ExperimentTwo(rsample::training(trainData)))
+
+summary.lm(modelTwo)
+```
+
+```{r}
+.PlotFour(modelTwo)
+```
+
+## Model 3 - Reduced Model
+
+```{r}
+modelThree = lm(y ~ ., ExperimentThree(rsample::training(trainData)))
+
+summary.lm(modelThree)
+```
+
+```{r}
+.PlotFour(modelThree)
+```
+
+## Model 4-6 - Poisson Regression Models
+
+```{r}
+modelFour = glm(y ~ ., rsample::training(trainData), family = poisson(link = "log"))
+modelFive = glm(y ~ ., ExperimentTwo(rsample::training(trainData)), family = poisson(link = "log"))
+modelSix = glm(y ~ ., ExperimentThree(rsample::training(trainData)), family = poisson(link = "log"))
+```
+
+
+```{r}
+.PlotFour(modelFour)
+```
+
+```{r}
+.PlotFour(modelFive)
+```
+
+```{r}
+.PlotFour(modelSix)
+```
+
+# Model Selection
+
+```{r}
+stats::anova(test = "Chisq", modelOne, modelTwo, modelThree)
+```
+
+```{r}
+stats::anova(test = "Chisq", modelFour, modelFive, modelSix)
+```
+
+## Linear Regression Metrics
+
+```{r}
+list(modelOne, modelTwo, modelThree) %>%
+  lapply(predict.lm, rsample::testing(trainData)) %>%
+    { data.frame(
+      Model = c("Model One", "Model Two", "Model Three"),
+      RMSE = sapply(., ModelMetrics::rmse, rsample::testing(trainData)$y),
+      MAE = sapply(., ModelMetrics::mae, rsample::testing(trainData)$y),
+      AIC = sapply(list(modelOne, modelTwo, modelThree), stats::AIC)
+    )}
+```
+
+## Poisson Model Metrics
+
+```{r}
+list(modelFour, modelFive, modelSix) %>%
+  lapply(predict, rsample::testing(trainData)) %>%
+    { data.frame(
+      Model = c("Model Four", "Model Five", "Model Six"),
+      RMSE = sapply(., ModelMetrics::rmse, rsample::testing(trainData)$y),
+      AIC = sapply(list(modelFour, modelFive, modelSix), stats::AIC)
+    )}
+```
+
+## T-Test disparate models
+
+```{r}
+list(modelOne, modelFour) %>%
+  lapply(predict, rsample::testing(trainData)) %>%
+    { t.test(.[[1]], .[[2]], alternative = "two.sided", paired = TRUE) }
+```
+
+## Visualization of Predictions
+
+```{r}
+comparison = list(modelOne, modelFour) %>%
+  lapply(predict, rsample::testing(trainData)) %>%
+    { do.call(cbind, .) } %>%
+      { cbind(seq_len(length(.[, 1])), rsample::testing(trainData)$y, .) } %>%
+        magrittr::set_colnames(c("INDEX", "y", "LinearModel", "PoissonModel")) %>%
+          as.data.frame(.)
+
+lattice::xyplot(INDEX ~ y, data = comparison)
+lattice::xyplot(INDEX ~ LinearModel, data = comparison)
+lattice::xyplot(INDEX ~ PoissonModel, data = comparison)
+```
+
+```{r}
+```
+
