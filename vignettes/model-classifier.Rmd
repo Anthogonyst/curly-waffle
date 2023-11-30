@@ -1,0 +1,104 @@
+---
+title: "Tax Classifications"
+author: "Anthony Arroyo"
+date: "`r format(Sys.time(), '%m/%d/%Y')`"
+output: 
+  pdf_document:
+    pandoc_args: --listings
+    includes:
+      in_header: preamble.tex
+params:
+  sample_param:
+    value: 0
+---
+\newcommand{\br}{\hfill\break}
+\newcommand{\brsp}{\vspace{8pt}\hfill\break}
+```{r header, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(here)
+library(reshape2)
+library(parsnip)
+library(yardstick)
+library(caret)
+library(rpart.plot)
+
+invisible(lapply(list.files(here::here("R"), "\\.R$", full.names = TRUE), source))
+(function() { set.seed(8675309) })()
+```
+
+```{r dataload, warning=FALSE}
+finance = LoadMarketData()
+brooklyn = PipelineBrooklyn()
+brook = brooklyn %>%
+  CleanCols(., TargetTaxPrevious) %>%
+    fastDummies::dummy_cols(., "y") %>%
+      dplyr::select(-y, -saledate) %>%
+        CleanCoordinates(.) %>%
+          CleanFinance(.) %>%
+            CleanColsAssessment(.)
+
+fixer2 = PreProcessExp2(brook)
+fixer3 = PreProcessExp3(brook)
+fixer4 = PreProcessExp4(brook)
+fixer5 = PreProcessExp5(brook)
+
+crossValid = caret::trainControl(method = "cv", number = 5)
+
+tts = brook %>%
+  { UndoPreProcess(PreProcessApply(., fixer2), ., "^y_?\\d?.?$") } %>%
+    rsample::initial_split(.)
+
+# randomness
+# outliers
+# homodeskicity
+# transform
+```
+
+## R Markdown
+
+```{r, echo=FALSE, class.source="fold-hide"}
+modelOne = glm(y_1 ~ . - y_2 - y_3 - y_4, rsample::training(tts), family = binomial(link = "logit"))
+modelTwo = glm(y_1 ~ . - y_2 - y_3 - y_4, rsample::training(tts), family = quasibinomial(link = "logit"))
+modelThree = glm(y_1 ~ . - y_2 - y_3 - y_4, rsample::training(tts), family = poisson(link = "log"))
+modelFour = glm(y_1 ~ . - y_2 - y_3 - y_4, rsample::training(tts), family = gaussian(link = "identity"))
+saveRDS(modelFour, here::here("data/models", "model-classifier-gaussian.rds"))
+```
+
+```{r}
+models = list(modelOne, modelTwo, modelThree, modelFour)
+results = lapply(models, ValidationPipeline, rsample::testing(tts), "y_1", 0.5)
+bestResults = VerifyKfold(modelFour, rsample::testing(tts), "y_1", 0.5)
+saveRDS(bestResults, here::here("data/models", "model-classifier-gaussian-results.rds"))
+```
+
+```{r}
+lapply(results, function(x) attributes(x[[2]]))
+```
+
+```{r}
+#summary(modelOne)
+summary(modelOne)$coefficients[, 1] %>% .[. == max(.)]
+```
+
+```{r}
+summary(modelFour)
+summary(modelFour)$coefficients[, 1] %>% .[. == max(.)]
+```
+
+```{r}
+# roc = Roc(y, output[, 2], points = 200) 
+# PlotRoc(roc)
+```
+
+```{r}
+# attr(roc, "AUC")
+```
+
+# pROC package
+
+```{r, message=FALSE}
+# MakePredictions(modelFour, rsample::testing(tts), "y_1", 0.5) %>%
+#   { pROC::plot.roc(pROC::roc(response = .$class, predictor = .$probability)) }
+```
+
