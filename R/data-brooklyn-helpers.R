@@ -55,13 +55,15 @@ LoadPluto <- function(...) {
     subset(., borough == "BK")
 }
 
-LoadMarketData <- function(dropMissing = TRUE, indexPos = seq_len(6),
-                           indexName = c("CPIAUCSL", "GDP", "FEDFUNDS", "UNRATE", "CSUSHPISA")) {
+LoadMarketData <- function(dropMissing = TRUE, indexPos = seq_len(8),
+                           indexName = c("CPIAUCSL", "GDP", "FEDFUNDS", "UNRATE", "CSUSHPISA", "EFFR", "PPIACO")) {
   cpi = .ReadCsv(here::here("data/fred", "CPIAUCSL.csv"))
   fed = .ReadCsv(here::here("data/fred", "FEDFUNDS.csv"))
   gdp = .ReadCsv(here::here("data/fred", "GDP.csv"))
+  ppi = .ReadCsv(here::here("data/fred", "PPIACO.csv"))
   unemp = .ReadCsv(here::here("data/fred", "UNRATE.csv"))
   shiller = .ReadCsv(here::here("data/fred", "CSUSHPISA.csv"))
+#  effr = .ReadCsv(here::here("data/fred", "EFFR.csv"))
   
   market = gdp %>%
     rbind(
@@ -73,7 +75,9 @@ LoadMarketData <- function(dropMissing = TRUE, indexPos = seq_len(6),
         dplyr::full_join(., fed, by = "DATE") %>%
           dplyr::full_join(., unemp, by = "DATE") %>%
             dplyr::full_join(., shiller, by = "DATE") %>%
-              .[, (seq_len(ncol(.)) %in% c(1, indexPos)) & (colnames(.) %in% c("DATE", indexName))]
+#              dplyr::full_join(., effr, by = "DATE") %>%
+                dplyr::full_join(., ppi, by = "DATE") %>%
+                  .[, (seq_len(ncol(.)) %in% c(1, indexPos)) & (colnames(.) %in% c("DATE", indexName))]
   
   if (dropMissing[[1]]) {
     market = tidyr::drop_na(market)
@@ -105,6 +109,11 @@ LoadMarketData <- function(dropMissing = TRUE, indexPos = seq_len(6),
   market
 }
 
+.LoadFraudelentAddresses <- function() {
+  readLines(here::here("data", "suspicious-addresses.txt")) %>%
+    data.frame(ADDRESS = .)
+}
+
 PrepareBrooklyn <- function(df) {
   df %>%
     dplyr::mutate(
@@ -121,6 +130,12 @@ PrepareDoF <- function(df) {
   df %>%
     subset(., `SALE PRICE` > 100) %>%
       .[, ! colnames(.) %in% c("EASE-MENT")]
+}
+
+PreparePluto <- function(df) {
+  df$bsmtcode = ifelse(df$bsmtcode == 0, 5, df$bsmtcode)
+  
+  df
 }
 
 AggregateMarket <- function(df, dateCol = "SALE DATE", dropMissing = TRUE) {
@@ -146,6 +161,9 @@ AggregateBrooklyn <- function(df, authority) {
 
 PipelineBrooklyn <- function(...) {
   rolling = PrepareDoF(LoadDoF(...))
-  pluto = LoadPluto()
-  AggregateBrooklyn(rolling, pluto)
+  pluto = PreparePluto(LoadPluto())
+  fin = LoadMarketData()
+  
+  merged = AggregateBrooklyn(rolling, pluto)
+  AggregateMarket(merged)
 }
