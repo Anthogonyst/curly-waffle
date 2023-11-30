@@ -1,0 +1,68 @@
+---
+title: "Street Cleaning"
+author: "Anthony Arroyo"
+date: "`r format(Sys.time(), '%m/%d/%Y')`"
+output: 
+  pdf_document:
+    pandoc_args: --listings
+    includes:
+      in_header: preamble.tex
+params:
+  sample_param:
+    value: 0
+---
+\newcommand{\br}{\hfill\break}
+\newcommand{\brsp}{\vspace{8pt}\hfill\break}
+```{r header, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(here)
+library(reshape2)
+library(rvest)
+
+invisible(lapply(list.files(here::here("R"), "\\.R$", full.names = TRUE), source))
+(function() { set.seed(8675309) })()
+```
+
+```{r private, include=FALSE}
+```
+
+```{r dataload, warning=FALSE}
+brooklyn = PipelineBrooklyn()
+addr = which(colnames(brooklyn) %in% c("address", "ADDRESS"))
+```
+
+```{r}
+stringdist::stringdist(brooklyn$address, brooklyn$ADDRESS) %>%
+  hist(., main = "String distance between Address.rolling and ADDRESS.pluto")
+```
+
+```{r}
+stringdist::stringdist(brooklyn$address, brooklyn$ADDRESS) %>%
+  { brooklyn[. == 5, addr] } %>%
+    head(., 10)
+```
+
+```{r}
+stringdist::stringdist(brooklyn$address, brooklyn$ADDRESS) %>%
+  { brooklyn[. == 5, addr] } %>%
+    head(., 10)
+```
+
+```{r}
+head(zc[, addr[1]]) %>%
+  gsub("STREET", "STR", .) %>%
+    gsub("AVENUE", "AVE", .) %>%
+      gsub("BOULEVARD", "BLVD")
+```
+
+```{r}
+fraudDetection = Dictionary(brooklyn, "ADDRESS", "SALE PRICE", .BadHistory)
+recentFraud = Dictionary(brooklyn, "ADDRESS", "SALE PRICE", .Worsened)
+```
+
+```{r}
+
+```
+
+
