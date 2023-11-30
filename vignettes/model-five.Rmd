@@ -1,0 +1,370 @@
+---
+title: "Template Worksheet"
+author: "Anthony Arroyo"
+date: "`r format(Sys.time(), '%m/%d/%Y')`"
+output: 
+  pdf_document:
+    pandoc_args: --listings
+    includes:
+      in_header: preamble.tex
+params:
+  sample_param:
+    value: 0
+---
+\newcommand{\br}{\hfill\break}
+\newcommand{\brsp}{\vspace{8pt}\hfill\break}
+```{r header, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(here)
+library(reshape2)
+library(parsnip)
+library(yardstick)
+library(caret)
+library(rpart.plot)
+
+invisible(lapply(list.files(here::here("R"), "\\.R$", full.names = TRUE), source))
+(function() { set.seed(8675309) })()
+```
+
+```{r private, include=FALSE}
+```
+
+```{r dataload, warning=FALSE}
+finance = LoadMarketData()
+brooklyn = PipelineBrooklyn()
+brook = brooklyn %>%
+  dplyr::filter(., `TAX CLASS AT TIME OF SALE` == 1, landuse == "01") %>%
+    CleanTons(.) %>%
+      dplyr::select(-ext) %>%
+        .[, sapply(., var) != 0]
+
+fixer2 = PreProcessExp2(brook)
+fixer3 = PreProcessExp3(brook)
+fixer4 = PreProcessExp4(brook)
+fixer5 = PreProcessExp5(brook)
+
+crossValid = caret::trainControl(method = "cv", number = 5)
+
+tts = brook %>%
+  PreProcessApply(., fixer2) %>%
+    rsample::initial_split(.)
+
+brookLightSubset = rsample::training(tts) %>%
+  RemoveInfluencers(., lm(y~., .), 3) %>%
+    RemoveInfluencers(., lm(y~., .), 3) %>%
+      RemoveInfluencers(., lm(y~., .), 4) %>%
+        RemoveInfluencers(., lm(y~., .), 4)
+
+brookHeavySubset = rsample::training(tts) %>%
+  CleanInfluencers(.) %>%
+    RemoveInfluencers(., lm(y~., .), 4) %>%
+      RemoveInfluencers(., lm(y~., .), 4)
+```
+
+
+## R Markdown
+
+
+# Descriptive Stats
+
+Since we have done the descriptive analysis and EDA in our previous report, we will reuse the dataset and skip it here.
+Our target variable this time will be the total units sold.
+This is extremely important for analysis reasons since a credit card statement may only have the total cost.
+However, if we were to estimate the amount of cargo moving between two nations, we can estimate a base price and cost and then extrapolate the number of units for example. 
+
+
+## Initial Data Split
+
+For our official models, we will create a training and testing dataset on a regular 80-20 split.
+Additionally, we will perform cross validation across 5 unique models to verify our results.
+Then we will model accordingly.
+
+
+## Decision Tree Depth Optimization
+
+First of all, we want to discuss how deep we want our decision tree to be.
+The simple decision tree we will use will be a model with n depth.
+Afterwards, we will use an unbounded decision tree and a random forest and compare the results.
+
+
+According to our plot, the most optimal depth is 6 branches long.
+Adding additional branches afterwards will only complicate our analysis and bloat our model.
+
+```{r, eval=FALSE}
+num = lapply(seq_len(30), DecisionTree, df = brook) %>%
+  lapply(., function(x) { x[[3]] }) %>%
+    do.call(rbind, .)
+
+ggplot2::ggplot(num) +
+ggplot2::aes(x = tree_depth, y = .estimate, colour = .metric) +
+ggplot2::geom_line(size = 0.5) +
+ggplot2::scale_color_hue(direction = 1) +
+ggplot2::theme_minimal() +
+ggplot2::ggtitle("Optimal tree depth for decision tree")
+```
+
+# Model 1: Depth Enforced Decision Tree
+
+Using the optimal depth of 6, we would thus expect around 125 nodes.
+However, the reality is stranger than expected because the "optimal" choice doesn't divide six times supposedly.
+As we can see from our output, even though this data is bounded to a depth of 6, most branches aren't 6 nodes deep.
+Only one branch is 6 nodes deep.
+
+```{r}
+RunDecisionTree <- function(df, ntree, label) {
+  DecisionTree(df, ntree) %>%
+    tibble::tibble(.) %>%
+      rbind(paste(label, nrow(df), ntree, sep = "-"), ntree, ., .[3, 1][[1]][[1]][2, 3][[1]]) %>%
+        t(.)
+}
+```
+
+
+```{r}
+rsample::training(tts) %>%
+  sapply(seq_len(5) * 6, RunDecisionTree, df = ., label = "no-clean")
+```
+
+```{r}
+brookLightSubset %>%
+  sapply(seq_len(5) * 6, RunDecisionTree, df = ., label = "half-clean")
+```
+
+```{r}
+brookHeavySubset %>%
+  sapply(seq_len(5) * 6, RunDecisionTree, df = ., label = "full-clean")
+```
+
+```{r}
+bestOrig = RunDecisionTree(rsample::training(tts), 16, "optimal-original")[3][[1]]
+bestLight = RunDecisionTree(brookLightSubset, 16, "optimal-light-clean")[3][[1]]
+bestHeavy = RunDecisionTree(brookHeavySubset, 16, "optimal-full-clean")[3][[1]]
+
+pred = predict(bestOrig, new_data = rsample::testing(tts))
+cbind(y = rsample::testing(tts)$y, pred) %>%
+  yardstick::metrics(., truth = "y", estimate = ".pred")
+```
+
+# Model 2: Node Count Enforced Decision Tree
+
+```{r, eval=FALSE}
+treeUnbounded = train(y ~ ., method = "rpart", trControl = crossValid, tuneLength = 125, data = rsample::training(tts))
+rpart.plot(treeUnbounded$finalModel)
+```
+
+```{r}
+RunRpart <- function(df, nodeCount, label, test = NULL) {
+  if (is.null(test)) {
+    ttsData = rsample::initial_split(df)
+    trainData = rsample::training(ttsData)
+    testData = rsample::testing(ttsData)
+  } else {
+    trainData = df
+    testData = test
+  }
+  
+  train(y ~ ., method = "rpart", trControl = crossValid, tuneLength = nodeCount, data = trainData) %>%
+    list(
+      paste(label, nrow(df), nodeCount, sep = "-"),
+      nodeCount, 
+      .,
+      AnalyzeTree(., testData),
+      AnalyzeTree(., testData)[[3]][2, 3][[1]]
+    ) %>%
+      tibble::tibble(.) %>%
+        t(.)
+}
+```
+
+```{r, warning=FALSE}
+unfiltered = rsample::testing(tts)
+
+rsample::training(tts) %>%
+  sapply(seq_len(10) * 100, RunRpart, df = ., label = "no-clean", test = unfiltered)
+```
+
+```{r, warning=FALSE}
+brookLightSubset %>%
+  sapply(seq_len(10) * 100, RunRpart, df = ., label = "half-clean", test = unfiltered)
+```
+
+```{r, warning=FALSE}
+brookHeavySubset %>%
+  sapply(seq_len(10) * 100, RunRpart, df = ., label = "full-clean", test = unfiltered)
+```
+
+# Model 3: Random Forest
+
+```{r}
+rforest = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 220, data = rsample::training(tts))
+AnalyzeTree(rforest, rsample::testing(tts))[[3]]
+saveRDS(rforest, here::here("data/models", "model-five-random-forest.rds"))
+```
+
+Random forest is an ensemble method so we can't individually visualize each tree.
+I'm not sure how to actually explain a random forest or discern the valuable features from it.
+However, if we compare the MAE, the performance is incredible with only 20 trees in the ensemble.
+Clearly, the random forest is outperforming to an extreme compared to either of the simple decision trees.
+
+```{r}
+forestOne1 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 20, maxnodes = 40, data = rsample::training(tts))
+forestOne2 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 10, maxnodes = 80, data = rsample::training(tts))
+forestOne3 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 4, maxnodes = 200, data = rsample::training(tts))
+
+rbind(
+  AnalyzeTree(forestOne1, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestOne2, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestOne3, rsample::testing(tts))[[3]]
+)
+```
+
+
+# Model 3B: Random Forest
+
+```{r}
+forestTwo1 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 120, data = rsample::training(tts))
+forestTwo2 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 120, data = ExperimentTwo(rsample::training(tts)))
+forestTwo3 = train(y ~ ., method = "rf", trControl = crossValid, ntree = 80, maxnodes = 120, data = ExperimentThree(rsample::training(tts)))
+
+rbind(
+  AnalyzeTree(forestTwo1, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestTwo2, rsample::testing(tts))[[3]],
+  AnalyzeTree(forestTwo3, rsample::testing(tts))[[3]]
+)
+
+```
+
+
+# Model 4: XGBoost Model
+
+```{r}
+xgModel = rsample::training(tts)[, sapply(rsample::training(tts), is.numeric)] %>%
+  head(., 5000) %>%
+    { as.matrix(.[, -1]) } %>%
+      xgboost::xgb.cv(data = ., label = head(rsample::training(tts)$y, nrow(.)),
+      objective = "reg:squarederror", nrounds = 10, nfold = 3, eta = 0.1, max_depth = 200)
+
+xgbData = rsample::training(tts)[, sapply(rsample::training(tts), is.numeric)] %>%
+  head(., 5000) %>%
+    { as.matrix(.[, -1]) } %>%
+      xgboost::xgb.DMatrix(., label = as.matrix(head(rsample::training(tts)$y, nrow(.))))
+
+# xgbData2 = rsample::training(tts)[, sapply(rsample::testing(tts), is.numeric)] %>%
+#   head(., 5000) %>%
+#     { as.matrix(.[, -1]) } %>%
+#       xgboost::xgb.DMatrix(., label = as.matrix(head(rsample::training(tts)$y, nrow(.))))
+
+# xgbModelReal = xgboost::xgb.train(data = xgbData, nrounds = 10, params = list(
+#   objective = "reg:squarederror", eta = 0.1, max_depth = 200
+# ))
+#       xgboost::xgb.train(data = ., label = as.matrix(head(rsample::training(tts)$y, nrow(.))),
+```
+
+```{r}
+
+training<-data.table(training)
+testing<-data.table(testing)
+
+featurePlot(x=training,y=classe,plot="strip",col=rgb(red=0.2,green=0.2,blue=1.0,alpha=0.2),pch=16)
+
+# LABEL: Convert to numeric matrix. 
+# Requirements: label inputs need to start from 0. thus, classe<-class-1
+# For XGBOOST multi-classification problem, an important input is the number of outcome classes/categories.
+mat.classe<-as.matrix(as.integer(classe)-1)
+num.classe
+
+# DATA: Convert to numeric matrix) for both training and testing data
+mat.training <- rsample::training(tts)[, c(-2, -19)] %>%
+  as.matrix.data.frame(.) %>%
+    xgboost::xgb.DMatrix(.)
+  # (rsample::training(tts)[, -2])
+mat.testing <- rsample::testing(tts)[, c(-2, -19)] %>%
+  as.matrix.data.frame(.) %>%
+    xgboost::xgb.DMatrix(.)
+
+best_param = list()
+best_seednumber = 1
+best_merror = Inf
+best_merror_index = 0
+
+# Create a results matrix to store the test error rates
+results.matrix<-data.frame(matrix(0,ncol=4,nrow = 10))
+names(results.matrix)<-c("Iteration","CV Test Error", "nrounds Index","Seed Number")
+
+for (i in 1:10) {
+    param <- list(objective = "multi:softmax", # Choose either multi:softmax or multi:softprob
+                  eval_metric = "merror",
+                  num_class = num.classe,
+                  max_depth = sample(6:10, 1),
+                  eta = runif(1, .01, .3),
+                  gamma = runif(1, 0.0, 0.2), 
+                  subsample = runif(1, .6, .9),
+                  colsample_bytree = runif(1, .5, .8), 
+                  min_child_weight = sample(1:40, 1),
+                  max_delta_step = sample(1:10, 1)
+    )
+    cv.nround = 150
+    cv.nfold = 5
+    seed.number = sample.int(10000, 1)[[1]]
+    set.seed(seed.number)
+    mod.cv <- xgb.cv(data=mat.training,
+                     label=mat.classe,
+                     params = param, 
+                     nthread=6, 
+                     nfold=cv.nfold, 
+                     nrounds=cv.nround,
+                     verbose = FALSE, 
+                     maximize=FALSE)
+
+    min_merror = min(mod.cv[, test.merror.mean])
+    min_merror_index = which.min(mod.cv[, test.merror.mean])
+    
+    # Store results in results.matrix
+    results.matrix[i,1]<-i
+    results.matrix[i,2]<-min_merror
+    results.matrix[i,3]<-min_merror_index
+    results.matrix[i,4]<-seed.number
+
+    if (min_merror < best_merror) {
+        best_merror = min_merror
+        best_merror_index = min_merror_index
+        best_seednumber = seed.number
+        best_param = param
+    }
+}
+
+# Create final model
+set.seed(best_seednumber)                   # Optimised seed number
+xgb.best<-xgboost(data= mat.training[, -1],
+                 label= mat.training[, 1],
+#                 params = best_param,       # Optimised params
+                 nthread=6, 
+                 nrounds=best_merror_index,   # Optimised nround
+                 verbose = FALSE,
+                 maximize=FALSE
+#                 predict=TRUE
+                  )
+
+modfit.pred<-predict(xgb.best,mat.training)
+
+conf.mat<-confusionMatrix(mat.classe, as.matrix(modfit.pred))
+
+# Accuracy and Error Rates
+accuracy.rate<-conf.mat$overall[1]*100
+error.rate<-100-accuracy.rate
+
+# Create plot for feature importance in final model
+importance_matrix<-xgb.importance(names(training),model=xgb.best)
+xgb.plot.importance(importance_matrix[1:20,])
+
+test.res<-rep(0,20)
+
+# Note that the classification outcome is still in discrete numerics (0 to 4), with 0 representing "A" and 4 representing "E".
+for (i in 1:20) {
+    modfit.test.predict<-predict(xgb.best,
+                                 matrix(mat.testing[i,],nrow=1,ncol=39)) 
+    test.res[i]<-modfit.test.predict+1
+}
+```
+
